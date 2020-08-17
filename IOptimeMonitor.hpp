@@ -1,7 +1,7 @@
 #ifndef IOPTIMEMONITOR_HPP
 #define IOPTIMEMONITOR_HPP 1
 #include "ISubject.hpp"
-
+#include <cstdint>
 
 class IOptimeMonitor : public ISubject
 {
