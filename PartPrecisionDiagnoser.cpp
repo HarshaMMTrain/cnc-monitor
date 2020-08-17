@@ -1,27 +1,57 @@
 #include "PartPrecisionDiagnoser.hpp"
 #include "DiagnoserRegister.hpp"
-#include "utility.hpp"
+#include "IPartPrecisionMonitor.hpp"
 
 REGISTER_TO_DIAGFACTORY(PartPrecisionDiagnoser, "partprecision")
 
-int
-PartPrecisionDiagnoser::diagnose(const std::vector<DiagParam> &diagParamArray,
-                                 std::string &diagnosis)
+PartPrecisionDiagnoser::PartPrecisionDiagnoser() :
+    diagName("partprecision"),
+    partPrecision(0.0),
+    sendNotify(false),
+    partPrecisionNotifier(this)
 {
-    float paramVal;
-    int ret = getParamValue("partprecision", diagParamArray, paramVal);
-    diagnosis.assign("partprecision: No relevant input");
-    if (0 == ret)
+    partPrecisionSource = getPartPrecisionMonitor();
+    partPrecisionSource->addObserver(&partPrecisionNotifier);
+}
+
+PartPrecisionDiagnoser::~PartPrecisionDiagnoser()
+{
+    partPrecisionSource->removeObserver(&partPrecisionNotifier);
+}
+
+void
+PartPrecisionDiagnoser::readPartPrecision()
+{
+    partPrecision = partPrecisionSource->getPartPrecision();
+    if (partPrecision > 0.05)
     {
-        if (paramVal > 0.05)
-        {
-            ret = 1;
-            diagnosis.assign("partprecision: beyond the acceptable higher limit(0.05mm)");
-        }
-        else
-        {
-            diagnosis.assign("partprecision: OK ");
-        }
+        sendNotify = true;
+    }
+}
+
+bool
+PartPrecisionDiagnoser::getDiagnosis(std::string &diagnosis)
+{
+    bool ret = false;
+    if (partPrecision > 0.05)
+    {
+        diagnosis.assign("partprecision: beyond the acceptable higher limit(0.05mm)");
+    }
+    else
+    {
+        ret = true;
+        diagnosis.assign("partprecision: OK ");
     }
     return ret;
 }
+
+void
+PartPrecisionDiagnoser::dispatchEvents()
+{
+    if (sendNotify)
+    {
+        sendNotify = false;
+        notify();
+    }
+}
+

@@ -1,31 +1,60 @@
 #include "OptimeDiagnoser.hpp"
 #include "DiagnoserRegister.hpp"
-#include "utility.hpp"
+#include "IOptimeMonitor.hpp"
 
 REGISTER_TO_DIAGFACTORY(OptimeDiagnoser, "optime")
 
-int
-OptimeDiagnoser::diagnose(const std::vector<DiagParam> &diagParamArray,
-                         std::string &diagnosis)
+#define HOURSTOSECS(hours) (hours * 60 * 60)
+
+OptimeDiagnoser::OptimeDiagnoser() :
+    diagName("optime"),
+    optime(0.0),
+    sendNotify(false),
+    optimeNotifier(this)
 {
-    float paramVal;
-    int ret = getParamValue("optime", diagParamArray, paramVal);
-    if (0 == ret)
+    optimeSource = getOptimeMonitor();
+    optimeSource->addObserver(&optimeNotifier);
+}
+
+OptimeDiagnoser::~OptimeDiagnoser()
+{
+    optimeSource->removeObserver(&optimeNotifier);
+}
+
+void
+OptimeDiagnoser::readOptime()
+{
+    optime = optimeSource->getOptime();
+    if (optime > (uint32_t)HOURSTOSECS(6))
     {
-        if (paramVal > 6)
-        {
-            ret = 1;
-            diagnosis.assign("optime: continuous operating time beyond the acceptable higher limit(6hrs)");
-        }
-        else
-        {
-            diagnosis.assign("optime: OK ");
-        }
+        sendNotify = true;
+    }
+}
+
+bool
+OptimeDiagnoser::getDiagnosis(std::string &diagnosis)
+{
+    bool ret = false;
+    if (optime > (uint32_t)HOURSTOSECS(6))
+    {
+        diagnosis.assign("optime: continuous operating time beyond the acceptable higher limit(6hrs)");
     }
     else
     {
-        diagnosis.assign("optime: No relevant input");
+        ret = true;
+        diagnosis.assign("optime: OK ");
     }
-
     return ret;
 }
+
+void
+OptimeDiagnoser::dispatchEvents()
+{
+    if (sendNotify)
+    {
+        sendNotify = false;
+        notify();
+    }
+}
+
+

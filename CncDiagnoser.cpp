@@ -1,30 +1,86 @@
 #include "CncDiagnoser.hpp"
 #include "DiagnoserFactory.hpp"
+#include "IObserver.hpp"
+#include "ITimer.hpp"
 #include <iostream>
 
-CncDiagnoser::CncDiagnoser(const unsigned int selfTestCode) :
-    diagnoser("default"),
+CncDiagnoser::CncDiagnoser() :
+    diagnoser(""),
     machineStatus("No machine"),
     environmentStatus("Unknown"),
-    isMachineFine(false),
-    isEnvironmentFine(false)
+    diagEvtHandlers(),
+    isMachineFine(true),
+    isEnvironmentFine(true),
+    sendNotify(false)
 {
-    DiagnoserFactory *diagFactory = DiagnoserFactory::getDiagnoserFactory();
-    IDiagnose* selfTestDiagnoser;
-    std::string selfTestModule("selftest");
-    std::vector<DiagParam> dParams{DiagParam("selftest", (float)selfTestCode)};
 
-    selfTestDiagnoser = diagFactory->getDiagnoser(selfTestModule);
-    if (nullptr != selfTestDiagnoser)
+}
+
+void
+CncDiagnoser::updateDiagnosis(IDiagnose *diagModule)
+{
+    std::string diagStatus;
+    bool isStatusOk;
+    isStatusOk = diagModule->getDiagnosis(diagStatus);
+    diagStatus += "\n";
+    if (!isStatusOk)
     {
-        isMachineFine = (selfTestDiagnoser->diagnose(dParams, machineStatus) != 0) ? false : true;
-        diagFactory->putDiagnoser(selfTestDiagnoser);
+        if (diagModule->getName() == "selftest")
+            machineStatus += diagStatus;
+        else
+            environmentStatus += diagStatus;
+    }
+}
+
+void
+CncDiagnoser::dispatchEvents()
+{
+    std::vector<DiagnoserEventHandler*>::iterator iter = diagEvtHandlers.begin();
+    getSystemTimer()->dispatchEvents();
+    machineStatus.assign("");
+    environmentStatus.assign("");
+    for (; iter != diagEvtHandlers.end(); ++iter)
+    {
+        IDiagnose *diagModule = (*iter)->getDiagnoser();
+        diagModule->dispatchEvents();
+        updateDiagnosis(diagModule);
+    }
+    if (sendNotify)
+    {
+        sendNotify = false;
+        notify();
     }
 }
 
 CncDiagnoser::~CncDiagnoser()
 {
+    DiagnoserFactory *diagFactory = DiagnoserFactory::getDiagnoserFactory();
+    std::vector<DiagnoserEventHandler*>::iterator iter = diagEvtHandlers.begin();
+    
+    for (; iter != diagEvtHandlers.end(); ++iter)
+    {
+        IDiagnose *diagModule = (*iter)->getDiagnoser();
+        diagModule->removeObserver(*iter);
+        diagFactory->putDiagnoser(diagModule);
+        delete(*iter);
+    }
+    diagEvtHandlers.clear();
+}
 
+void
+CncDiagnoser::diagnoserEvent(IDiagnose *diagnoser)
+{
+    std::string diagMessage;
+
+    if (diagnoser->getName() == "selftest")
+    {
+        isMachineFine &= diagnoser->getDiagnosis(diagMessage);
+    }
+    else
+    {
+        isEnvironmentFine &= diagnoser->getDiagnosis(diagMessage);
+    }
+    sendNotify = !isMachineFine || !isEnvironmentFine;
 }
 
 int
@@ -32,72 +88,50 @@ CncDiagnoser::setDiagnoser(const std::string &diagnoserName)
 {
     int ret = 0;
     DiagnoserFactory *diagFactory = DiagnoserFactory::getDiagnoserFactory();
-    diagnoser = diagnoserName;
 
-    if (diagnoserName != "default")
+    if (diagnoserName != diagnoser)
     {
-        if (nullptr == diagFactory->getDiagnoser(diagnoserName))
-            ret = -1;
+        diagnoser = diagnoserName;
+
+        if (diagnoserName == "default")
+            ret = setupDefaultDiagnosis(diagFactory);
+        else
+            ret = monitorDiagnoser(diagnoser, diagFactory);
     }
 
     return ret;
 }
 
-bool
-CncDiagnoser::defaultDiagnose(const std::vector<DiagParam> &diagParamArray,
-                              std::string &environmentStatus)
+int
+CncDiagnoser::setupDefaultDiagnosis(DiagnoserFactory *diagFactory)
 {
-    DiagnoserFactory *diagFactory = DiagnoserFactory::getDiagnoserFactory();
     std::vector<std::string> diagnoserArray;
-    environmentStatus.assign("");
     diagFactory->getDiagnoserArray(diagnoserArray);
-    int ret = 0;
+    int ret = -1;
 
     for (auto diagModuleName : diagnoserArray)
     {
-        int diagnoserRet;
-        std::string diagStatus("");
-        IDiagnose *diagModule;
-        diagModule = diagFactory->getDiagnoser(diagModuleName);
-        diagnoserRet = diagModule->diagnose(diagParamArray, diagStatus);
-        diagFactory->putDiagnoser(diagModule);
-        if (diagnoserRet >= 0)
-            ret |= diagnoserRet;
-        diagStatus += "\n";
-        environmentStatus += diagStatus;
+        ret = monitorDiagnoser(diagModuleName, diagFactory);
     }
-    return (ret == 0);
+
+    return ret;
 }
 
-bool
-CncDiagnoser::customDiagnose(const std::vector<DiagParam> &diagParamArray,
-                             std::string &environmentStatus)
+int
+CncDiagnoser::monitorDiagnoser(std::string &diagModuleName, DiagnoserFactory *diagFactory)
 {
-    DiagnoserFactory *diagFactory = DiagnoserFactory::getDiagnoserFactory();
-    std::string diagStatus("");
     IDiagnose *diagModule;
     int ret = -1;
-    environmentStatus.assign("");
-    
-    diagModule = diagFactory->getDiagnoser(diagnoser);
+    diagModule = diagFactory->getDiagnoser(diagModuleName);
 
     if (nullptr != diagModule)
     {
-        ret = diagModule->diagnose(diagParamArray, diagStatus);
-        diagFactory->putDiagnoser(diagModule);
-        diagStatus += "\n";
-        environmentStatus += diagStatus;
+        DiagnoserEventHandler *evtHandler = new DiagnoserEventHandler(diagModule, this);
+        diagModule->addObserver(evtHandler);
+        diagEvtHandlers.push_back(evtHandler);
+        ret = 0;
     }
-    return (ret == 0);
-}
-
-void
-CncDiagnoser::diagnose(const std::vector<DiagParam> &diagParamArray)
-{
-    if (diagnoser == "default")
-        isEnvironmentFine = defaultDiagnose(diagParamArray, environmentStatus);
-    else
-        isEnvironmentFine = customDiagnose(diagParamArray, environmentStatus);
+    return ret;
 }
 
 bool

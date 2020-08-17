@@ -1,28 +1,56 @@
 #include "TempDiagnoser.hpp"
 #include "DiagnoserRegister.hpp"
-#include "utility.hpp"
+#include "ITemperatureMonitor.hpp"
 
 REGISTER_TO_DIAGFACTORY(TempDiagnoser, "temperature")
 
-int
-TempDiagnoser::diagnose(const std::vector<DiagParam> &diagParamArray,
-                         std::string &diagnosis)
+TempDiagnoser::TempDiagnoser() :
+    diagName("temperature"),
+    temperature(0.0),
+    sendNotify(false),
+    tempNotifier(this)
 {
-    float paramVal;
-    int ret = getParamValue("temperature", diagParamArray, paramVal);
-    diagnosis.assign("temperature: No relevant input");
-    if (0 == ret)
+    tempSource = getTemperatureMonitor();
+    tempSource->addObserver(&tempNotifier);
+}
+
+TempDiagnoser::~TempDiagnoser()
+{
+    tempSource->removeObserver(&tempNotifier);
+}
+
+void
+TempDiagnoser::readTemperature()
+{
+    temperature = tempSource->getTemperature();
+    if (temperature > 35)
     {
-        if (paramVal > 35)
-        {
-            ret = 1;
-            diagnosis.assign("temperature: beyond the acceptable higher limit(35degrees)");
-        }
-        else
-        {
-            diagnosis.assign("temperature: OK ");
-        }
+        sendNotify = true;
+    }
+}
+
+bool
+TempDiagnoser::getDiagnosis(std::string &diagnosis)
+{
+    bool ret = false;
+    if (temperature > 35)
+    {
+        diagnosis.assign("temperature: beyond the acceptable higher limit(35degrees)");
+    }
+    else
+    {
+        ret = true;
+        diagnosis.assign("temperature: OK ");
     }
     return ret;
 }
 
+void
+TempDiagnoser::dispatchEvents()
+{
+    if (sendNotify)
+    {
+        sendNotify = false;
+        notify();
+    }
+}

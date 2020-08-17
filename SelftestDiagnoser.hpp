@@ -6,10 +6,14 @@
 class SelftestDiagnoser : public IDiagnose
 {
 public:
-    SelftestDiagnoser() { }
-    virtual ~SelftestDiagnoser() { }
-    virtual int diagnose(const std::vector<DiagParam> &diagParamArray,
-                         std::string &diagnosis);
+    SelftestDiagnoser();
+    virtual ~SelftestDiagnoser();
+    virtual bool getDiagnosis(std::string &diagnosis);
+    virtual std::string getName() { return diagName; }
+    virtual void dispatchEvents();
+private:
+    std::string diagName;
+    uint8_t selfTestCode;
 };
 
 #endif
